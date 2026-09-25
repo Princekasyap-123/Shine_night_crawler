@@ -1,0 +1,1141 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shine Night Crawler — Dashboard</title>
+<style>
+    :root {
+        --wf-blue: #1d4ed8;
+        --wf-blue-dark: #1e3a8a;
+        --wf-orange: #f5a623;
+        --bg: #f4f6fb;
+        --surface: #ffffff;
+        --surface-alt: #f8fafc;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+        --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+        --queued: #64748b;
+        --submitted: #1d4ed8;
+        --success: #16a34a;
+        --failed: #dc2626;
+        --radius: 10px;
+    }
+
+    html[data-theme="dark"] {
+        --bg: #0b1120;
+        --surface: #131b2e;
+        --surface-alt: #0f172a;
+        --border: #223049;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.5);
+        --queued: #94a3b8;
+        --submitted: #60a5fa;
+        --success: #4ade80;
+        --failed: #f87171;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    a { color: var(--wf-blue); }
+
+    /* ---------- Header ---------- */
+    header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 24px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        flex-wrap: wrap;
+    }
+
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+    }
+
+    .brand img { height: 34px; width: auto; display: block; }
+    .brand .divider { width: 1px; height: 28px; background: var(--border); }
+    .brand h1 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+        white-space: nowrap;
+    }
+    .brand .subtitle {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 1px;
+    }
+
+    .header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    select, input[type="text"], input[type="search"] {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+    }
+    select:focus, input:focus { border-color: var(--wf-blue); }
+
+    button {
+        font-family: inherit;
+        cursor: pointer;
+    }
+
+    .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface-alt);
+        color: var(--text);
+        font-size: 16px;
+    }
+    .icon-btn:hover { background: var(--border); }
+
+    /* ---------- Layout ---------- */
+    main {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+    }
+
+    .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+    .panel-header h2 {
+        font-size: 14px;
+        font-weight: 700;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .panel-body { padding: 20px; }
+
+    /* ---------- Session meta ---------- */
+    .session-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        align-items: center;
+    }
+    .session-meta-row .field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+    .session-meta-row .field .label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .session-meta-row .field .value { font-size: 14px; font-weight: 600; }
+
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: capitalize;
+    }
+    .badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+    .badge.status-running { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+    .badge.status-completed { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 15%, transparent); }
+    .badge.status-queued { color: var(--queued); background: color-mix(in srgb, var(--queued) 15%, transparent); }
+    .badge.status-submitted { color: var(--submitted); background: color-mix(in srgb, var(--submitted) 15%, transparent); }
+    .badge.status-success { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+    .badge.status-failed { color: var(--failed); background: color-mix(in srgb, var(--failed) 15%, transparent); }
+    .badge.paused { color: var(--wf-orange); background: color-mix(in srgb, var(--wf-orange) 18%, transparent); }
+
+    /* ---------- Stat tiles ---------- */
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 14px;
+        padding: 20px;
+    }
+    .stat-tile {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+    }
+    .stat-tile .stat-value { font-size: 26px; font-weight: 800; line-height: 1.1; }
+    .stat-tile .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .stat-tile.total .stat-value { color: var(--wf-blue); }
+    .stat-tile.queued .stat-value { color: var(--queued); }
+    .stat-tile.submitted .stat-value { color: var(--submitted); }
+    .stat-tile.success .stat-value { color: var(--success); }
+    .stat-tile.failed .stat-value { color: var(--failed); }
+
+    /* ---------- Filters ---------- */
+    .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+    .filters .spacer { flex: 1; }
+    .filters input[type="search"] { min-width: 200px; }
+
+    /* ---------- Table ---------- */
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+        text-align: left;
+        padding: 10px 14px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+    }
+    tbody td {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+        white-space: nowrap;
+    }
+    tbody tr:hover { background: var(--surface-alt); }
+    td.wrap { white-space: normal; max-width: 260px; }
+    td.mono { font-variant-numeric: tabular-nums; }
+
+    .link-btn {
+        background: none;
+        border: none;
+        color: var(--wf-blue);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 0;
+    }
+    .link-btn:hover { text-decoration: underline; }
+
+    .empty-state, .loading-state {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        border: 1px solid transparent;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-start { background: var(--success); color: #ffffff; }
+    .btn-start:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-stop { background: var(--failed); color: #ffffff; }
+    .btn-stop:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-outline {
+        background: var(--surface-alt);
+        border-color: var(--border);
+        color: var(--text);
+    }
+    .btn-outline:hover:not(:disabled) { background: var(--border); }
+    .btn-accent { background: var(--wf-blue); color: #ffffff; }
+    .btn-accent:hover:not(:disabled) { filter: brightness(1.08); }
+
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        display: inline-block;
+        animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+    }
+
+    .crawl-control-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 16px 20px;
+        border-top: 1px solid var(--border);
+    }
+    .crawl-control-row .status-text {
+        font-size: 13px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .form-msg {
+        font-size: 12px;
+        color: var(--failed);
+        min-height: 16px;
+    }
+    .form-msg.ok { color: var(--success); }
+
+    /* ---------- Search terms ---------- */
+    .term-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+    .term-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 6px 8px 6px 14px;
+        font-size: 13px;
+    }
+    .term-chip button {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        line-height: 1;
+    }
+    .term-chip button:hover { background: var(--failed); color: #fff; }
+    .add-term-row {
+        display: flex;
+        gap: 8px;
+    }
+    .add-term-row input { flex: 1; max-width: 320px; }
+
+    /* ---------- Candidates select column ---------- */
+    td.select-col, th.select-col { width: 32px; white-space: nowrap; }
+
+    /* ---------- Submitted phones ---------- */
+    .phone-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .phone-chip {
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* ---------- Modal ---------- */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 6vh 16px;
+        z-index: 100;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-md);
+        max-width: 640px;
+        width: 100%;
+        max-height: 82vh;
+        display: flex;
+        flex-direction: column;
+    }
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+    }
+    .modal-header h3 { margin: 0; font-size: 15px; }
+    .modal-body {
+        padding: 20px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        font-size: 13px;
+        line-height: 1.6;
+    }
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 18px;
+        color: var(--text-muted);
+        line-height: 1;
+    }
+
+    footer {
+        text-align: center;
+        padding: 20px;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    @media (max-width: 640px) {
+        header { padding: 12px 16px; }
+        main { padding: 16px; }
+        .brand h1 { font-size: 14px; }
+    }
+</style>
+</head>
+<body>
+{% csrf_token %}
+
+<header>
+    <div class="brand">
+        <img src="{% static 'dashboard/img/whiteforce-logo.png' %}" alt="WhiteForce logo">
+        <div class="divider"></div>
+        <div>
+            <h1>Shine Night Crawler</h1>
+            <div class="subtitle">Operator dashboard</div>
+        </div>
+        <div class="divider"></div>
+        <img src="{% static 'dashboard/img/shine-logo.png' %}" alt="Shine.com logo" style="height: 26px;">
+    </div>
+    <div class="header-right">
+        <span id="shine-session-badge" title="Result of a lightweight periodic check — no browser launched"></span>
+        <select id="session-select"></select>
+        <button class="icon-btn" id="refresh-btn" title="Refresh">&#x21bb;</button>
+        <button class="icon-btn" id="theme-toggle" title="Toggle theme">&#9789;</button>
+    </div>
+</header>
+
+<main>
+
+    <!-- Session meta -->
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Session</h2>
+            <span id="last-updated" style="font-size: 12px; color: var(--text-muted);"></span>
+        </div>
+        <div class="panel-body">
+            <div class="session-meta-row" id="session-meta">
+                <span class="loading-state">Loading session…</span>
+            </div>
+        </div>
+        <div class="stat-grid" id="stat-grid"></div>
+        <div class="crawl-control-row">
+            <button class="btn btn-start" id="start-crawl-btn">&#9654; Start Crawling</button>
+            <button class="btn btn-stop" id="stop-crawl-btn">&#9632; Stop Crawling</button>
+            <span class="status-text" id="crawl-live-indicator"></span>
+            <div class="spacer" style="flex: 1;"></div>
+            <span class="form-msg" id="crawl-control-msg"></span>
+        </div>
+    </section>
+
+    <!-- Search terms -->
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Search terms</h2>
+            <span style="font-size: 12px; color: var(--text-muted);">Rotation the crawler cycles through</span>
+        </div>
+        <div class="panel-body">
+            <div class="term-chip-list" id="term-chip-list">
+                <span class="loading-state">Loading…</span>
+            </div>
+            <form class="add-term-row" id="add-term-form">
+                <input type="text" id="add-term-input" placeholder="Add a new search term…" autocomplete="off">
+                <button type="submit" class="btn btn-accent">Add</button>
+            </form>
+            <div class="form-msg" id="add-term-msg"></div>
+        </div>
+    </section>
+
+    <!-- Candidates -->
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Candidates</h2>
+            <span id="candidate-count-label" style="font-size: 12px; color: var(--text-muted);"></span>
+        </div>
+        <div class="panel-body" style="padding-bottom: 0;">
+            <div class="filters" style="margin-bottom: 16px;">
+                <select id="filter-status">
+                    <option value="">All statuses</option>
+                    <option value="queued">Queued</option>
+                    <option value="submitted">Submitted</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <select id="filter-search-term">
+                    <option value="">All search terms</option>
+                </select>
+                <input type="search" id="filter-phone" placeholder="Search phone…">
+                <div class="spacer"></div>
+                <span class="form-msg" id="submit-selected-msg" style="min-height: auto;"></span>
+                <button class="btn btn-accent" id="submit-selected-btn" disabled>Send selected to API (<span id="selected-count">0</span>)</button>
+                <button class="icon-btn" id="export-btn" title="Copy visible phone numbers" style="width: auto; padding: 0 14px; font-size: 13px; font-weight: 600;">Copy phones</button>
+            </div>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="select-col"><input type="checkbox" id="select-all-queued" title="Select all queued"></th>
+                        <th>Phone</th>
+                        <th>Status</th>
+                        <th>Search term</th>
+                        <th>Page</th>
+                        <th>Extracted</th>
+                        <th>Submitted</th>
+                        <th>Resolved</th>
+                        <th>Failure reason</th>
+                        <th>Raw text</th>
+                    </tr>
+                </thead>
+                <tbody id="candidates-tbody">
+                    <tr><td colspan="10" class="loading-state">Loading candidates…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Submitted phones -->
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Phones sent to the extension API</h2>
+            <button class="link-btn" id="copy-all-submitted">Copy all</button>
+        </div>
+        <div class="panel-body">
+            <div class="phone-chip-list" id="submitted-phones">
+                <span class="loading-state">Loading…</span>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<footer>Shine Night Crawler &middot; connected to local DB via /api/stats/</footer>
+
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-title">Raw text</h3>
+            <button class="modal-close" id="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    const API_BASE = "/api/stats";
+    const CRAWLER_API_BASE = "/api/crawler";
+    const CONTROL_API_BASE = "/api/control";
+    const SUBMISSION_API_BASE = "/api/submission";
+
+    const el = {
+        sessionSelect: document.getElementById("session-select"),
+        refreshBtn: document.getElementById("refresh-btn"),
+        themeToggle: document.getElementById("theme-toggle"),
+        lastUpdated: document.getElementById("last-updated"),
+        sessionMeta: document.getElementById("session-meta"),
+        statGrid: document.getElementById("stat-grid"),
+        startCrawlBtn: document.getElementById("start-crawl-btn"),
+        stopCrawlBtn: document.getElementById("stop-crawl-btn"),
+        crawlLiveIndicator: document.getElementById("crawl-live-indicator"),
+        crawlControlMsg: document.getElementById("crawl-control-msg"),
+        termChipList: document.getElementById("term-chip-list"),
+        addTermForm: document.getElementById("add-term-form"),
+        addTermInput: document.getElementById("add-term-input"),
+        addTermMsg: document.getElementById("add-term-msg"),
+        candidatesTbody: document.getElementById("candidates-tbody"),
+        candidateCountLabel: document.getElementById("candidate-count-label"),
+        filterStatus: document.getElementById("filter-status"),
+        filterSearchTerm: document.getElementById("filter-search-term"),
+        filterPhone: document.getElementById("filter-phone"),
+        exportBtn: document.getElementById("export-btn"),
+        selectAllQueued: document.getElementById("select-all-queued"),
+        submitSelectedBtn: document.getElementById("submit-selected-btn"),
+        selectedCount: document.getElementById("selected-count"),
+        submitSelectedMsg: document.getElementById("submit-selected-msg"),
+        submittedPhones: document.getElementById("submitted-phones"),
+        copyAllSubmitted: document.getElementById("copy-all-submitted"),
+        modalOverlay: document.getElementById("modal-overlay"),
+        modalTitle: document.getElementById("modal-title"),
+        modalBody: document.getElementById("modal-body"),
+        modalClose: document.getElementById("modal-close"),
+        shineSessionBadge: document.getElementById("shine-session-badge"),
+    };
+
+    let currentSessionId = null;
+    let currentCandidates = [];
+    let phoneFilterTimer = null;
+    let selectedIds = new Set();
+
+    /* ---------- Theme ---------- */
+    function initTheme() {
+        let saved = null;
+        try { saved = localStorage.getItem("wf-dashboard-theme"); } catch (e) {}
+        const preferred = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", preferred);
+    }
+
+    el.themeToggle.addEventListener("click", function () {
+        const current = document.documentElement.getAttribute("data-theme");
+        const next = current === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("wf-dashboard-theme", next); } catch (e) {}
+    });
+
+    /* ---------- Helpers ---------- */
+    function fmtDate(iso) {
+        if (!iso) return "—";
+        const d = new Date(iso);
+        if (isNaN(d)) return "—";
+        return d.toLocaleString(undefined, {
+            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+        });
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str == null ? "" : String(str);
+        return div.innerHTML;
+    }
+
+    async function getJSON(url) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Request failed: " + url + " (" + res.status + ")");
+        return res.json();
+    }
+
+    // DRF's SessionAuthentication CSRF-validates any POST/DELETE made
+    // while a Django session cookie is present (e.g. the operator is
+    // also logged into /admin/ in this browser) — {% csrf_token %} in
+    // <body> guarantees the token exists on the page even though this
+    // template has no <form>. Used for every state-changing fetch call
+    // below (start/stop crawl, search-term add/remove, submit-selected).
+    function csrfToken() {
+        const el = document.querySelector("input[name=csrfmiddlewaretoken]");
+        return el ? el.value : "";
+    }
+
+    async function apiFetch(url, options) {
+        options = options || {};
+        const method = (options.method || "GET").toUpperCase();
+        const headers = Object.assign({}, options.headers || {});
+        if (method !== "GET" && method !== "HEAD") {
+            headers["X-CSRFToken"] = csrfToken();
+        }
+        return fetch(url, Object.assign({}, options, { headers: headers }));
+    }
+
+    /* ---------- Sessions ---------- */
+    async function loadSessions() {
+        const sessions = await getJSON(API_BASE + "/sessions/");
+        el.sessionSelect.innerHTML = "";
+        sessions.forEach(function (s, i) {
+            const opt = document.createElement("option");
+            opt.value = s.id;
+            const started = fmtDate(s.started_at);
+            opt.textContent = "#" + s.id + " — " + s.status + " (" + s.triggered_by + ") — " + started;
+            if (i === 0) opt.selected = true;
+            el.sessionSelect.appendChild(opt);
+        });
+        if (sessions.length === 0) {
+            const opt = document.createElement("option");
+            opt.textContent = "No sessions yet";
+            el.sessionSelect.appendChild(opt);
+            return null;
+        }
+        return sessions[0].id;
+    }
+
+    /* ---------- Session detail / stat tiles ---------- */
+    function statusBadge(status, extraClass) {
+        return '<span class="badge status-' + status + (extraClass ? " " + extraClass : "") + '">' + status + "</span>";
+    }
+
+    async function loadSessionDetail(sessionId) {
+        const s = await getJSON(API_BASE + "/sessions/" + sessionId + "/");
+
+        const counts = s.candidate_counts || {};
+        const total = Object.values(counts).reduce(function (a, b) { return a + b; }, 0);
+
+        el.sessionMeta.innerHTML = [
+            field("Status", statusBadge(s.status) + (s.is_paused ? " " + statusBadge("paused", "paused") : "")),
+            field("Triggered by", escapeHtml(s.triggered_by)),
+            field("Started", fmtDate(s.started_at)),
+            field("Ended", fmtDate(s.ended_at)),
+            field("Batch size", s.batch_size),
+            field("Backlog pause / resume", s.backlog_pause_threshold + " / " + s.backlog_resume_threshold),
+        ].join("");
+
+        el.statGrid.innerHTML =
+            statTile("total", "Total", total) +
+            statTile("queued", "Queued", counts.queued || 0) +
+            statTile("submitted", "Submitted", counts.submitted || 0) +
+            statTile("success", "Success", counts.success || 0) +
+            statTile("failed", "Failed", counts.failed || 0);
+    }
+
+    function field(label, value) {
+        return '<div class="field"><span class="label">' + label + '</span><span class="value">' + value + "</span></div>";
+    }
+
+    function statTile(cls, label, value) {
+        return '<div class="stat-tile ' + cls + '"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + "</div></div>";
+    }
+
+    /* ---------- Candidates ---------- */
+    function isSelectableStatus(status) {
+        return status === "queued" || status === "failed";
+    }
+
+    function updateSelectedUI() {
+        el.selectedCount.textContent = selectedIds.size;
+        el.submitSelectedBtn.disabled = selectedIds.size === 0;
+        const rowCheckboxes = el.candidatesTbody.querySelectorAll(".row-select");
+        el.selectAllQueued.checked = rowCheckboxes.length > 0 &&
+            Array.from(rowCheckboxes).every(function (cb) { return cb.checked; });
+    }
+
+    // preserveSelection: true for the live 5s auto-refresh while a
+    // crawl is running (pollCrawlState) — without this, picking rows
+    // to send while a session is active was impossible, since every
+    // poll wiped the checkboxes out from under the operator. Explicit
+    // user actions (switching session, changing a filter) still reset
+    // the selection as before, since those genuinely change what's on
+    // screen. Selection is always pruned to ids that are still present
+    // AND still selectable (queued/failed) in the new data, so a row
+    // that got submitted elsewhere between polls quietly drops out
+    // instead of staying counted as "selected".
+    async function loadCandidates(sessionId, preserveSelection) {
+        if (!preserveSelection) {
+            selectedIds = new Set();
+        }
+        el.candidatesTbody.innerHTML = '<tr><td colspan="10" class="loading-state">Loading candidates…</td></tr>';
+
+        const params = new URLSearchParams({ session: sessionId });
+        const status = el.filterStatus.value;
+        const searchTerm = el.filterSearchTerm.value;
+        const phone = el.filterPhone.value.trim();
+        if (status) params.set("status", status);
+        if (searchTerm) params.set("search_term", searchTerm);
+        if (phone) params.set("phone", phone);
+
+        const rows = await getJSON(API_BASE + "/candidates/last-night/?" + params.toString());
+        currentCandidates = rows;
+
+        const stillEligible = new Set(
+            rows.filter(function (r) { return isSelectableStatus(r.status); })
+                .map(function (r) { return r.id; })
+        );
+        selectedIds = new Set(Array.from(selectedIds).filter(function (id) { return stillEligible.has(id); }));
+
+        // Populate the search-term filter from the full (unfiltered-by-term) set once.
+        if (!searchTerm) {
+            const terms = Array.from(new Set(rows.map(function (r) { return r.search_term; }))).sort();
+            const currentValue = el.filterSearchTerm.value;
+            el.filterSearchTerm.innerHTML = '<option value="">All search terms</option>' +
+                terms.map(function (t) { return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + "</option>"; }).join("");
+            el.filterSearchTerm.value = currentValue;
+        }
+
+        el.candidateCountLabel.textContent = rows.length + " shown";
+        updateSelectedUI();
+
+        if (rows.length === 0) {
+            el.candidatesTbody.innerHTML = '<tr><td colspan="10" class="empty-state">No candidates match these filters.</td></tr>';
+            return;
+        }
+
+        el.candidatesTbody.innerHTML = rows.map(function (r, idx) {
+            const checkboxCell = isSelectableStatus(r.status)
+                ? '<td class="select-col"><input type="checkbox" class="row-select" data-id="' + r.id + '"' +
+                  (selectedIds.has(r.id) ? " checked" : "") + "></td>"
+                : '<td class="select-col"></td>';
+            return "<tr>" +
+                checkboxCell +
+                '<td class="mono">' + escapeHtml(r.phone || "—") + "</td>" +
+                "<td>" + statusBadge(r.status) + "</td>" +
+                "<td>" + escapeHtml(r.search_term) + "</td>" +
+                "<td>" + r.page_number + "</td>" +
+                "<td>" + fmtDate(r.extracted_at) + "</td>" +
+                "<td>" + fmtDate(r.submitted_at) + "</td>" +
+                "<td>" + fmtDate(r.resolved_at) + "</td>" +
+                '<td class="wrap">' + (r.failure_reason ? escapeHtml(r.failure_reason) : "—") + "</td>" +
+                '<td><button class="link-btn" data-idx="' + idx + '">View</button></td>' +
+                "</tr>";
+        }).join("");
+
+        el.candidatesTbody.querySelectorAll("button[data-idx]").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                const row = currentCandidates[Number(btn.getAttribute("data-idx"))];
+                openModal((row.phone || "Candidate #" + row.id) + " — raw text", row.raw_text || "(empty)");
+            });
+        });
+
+        el.candidatesTbody.querySelectorAll(".row-select").forEach(function (cb) {
+            cb.addEventListener("change", function () {
+                const id = Number(cb.getAttribute("data-id"));
+                if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+                updateSelectedUI();
+            });
+        });
+        updateSelectedUI();
+    }
+
+    el.selectAllQueued.addEventListener("change", function () {
+        const checked = el.selectAllQueued.checked;
+        el.candidatesTbody.querySelectorAll(".row-select").forEach(function (cb) {
+            cb.checked = checked;
+            const id = Number(cb.getAttribute("data-id"));
+            if (checked) selectedIds.add(id); else selectedIds.delete(id);
+        });
+        updateSelectedUI();
+    });
+
+    el.submitSelectedBtn.addEventListener("click", async function () {
+        if (selectedIds.size === 0) return;
+        const ids = Array.from(selectedIds);
+        el.submitSelectedBtn.disabled = true;
+        el.submitSelectedMsg.textContent = "Sending " + ids.length + "…";
+        try {
+            const res = await apiFetch(SUBMISSION_API_BASE + "/submit/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ candidate_ids: ids }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                el.submitSelectedMsg.textContent = data.detail || "Submit failed.";
+                return;
+            }
+            const submitted = data.results.filter(function (r) { return r.status === "submitted"; }).length;
+            const failed = data.results.filter(function (r) { return r.status === "failed"; }).length;
+            el.submitSelectedMsg.textContent = submitted + " submitted, " + failed + " failed.";
+            await loadSessionDetail(currentSessionId);
+            await loadCandidates(currentSessionId);
+            await loadSubmittedPhones(currentSessionId);
+        } catch (e) {
+            el.submitSelectedMsg.textContent = "Request failed: " + e.message;
+        } finally {
+            updateSelectedUI();
+        }
+    });
+
+    /* ---------- Search terms ---------- */
+    async function loadSearchTerms() {
+        el.termChipList.innerHTML = '<span class="loading-state">Loading…</span>';
+        const terms = await getJSON(CRAWLER_API_BASE + "/search-terms/");
+        if (terms.length === 0) {
+            el.termChipList.innerHTML = '<span class="empty-state">No search terms yet — add one below.</span>';
+            return;
+        }
+        el.termChipList.innerHTML = terms.map(function (t) {
+            return '<span class="term-chip">' + escapeHtml(t.term) +
+                '<button type="button" data-id="' + t.id + '" title="Remove">&times;</button></span>';
+        }).join("");
+
+        el.termChipList.querySelectorAll("button[data-id]").forEach(function (btn) {
+            btn.addEventListener("click", async function () {
+                btn.disabled = true;
+                try {
+                    await apiFetch(CRAWLER_API_BASE + "/search-terms/" + btn.getAttribute("data-id") + "/", {
+                        method: "DELETE",
+                    });
+                    loadSearchTerms();
+                } catch (e) {
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+
+    el.addTermForm.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        const term = el.addTermInput.value.trim();
+        if (!term) return;
+        el.addTermMsg.textContent = "";
+        el.addTermMsg.classList.remove("ok");
+        try {
+            const res = await apiFetch(CRAWLER_API_BASE + "/search-terms/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ term: term }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                el.addTermMsg.textContent = (data.term && data.term[0]) || "Could not add term.";
+                return;
+            }
+            el.addTermInput.value = "";
+            el.addTermMsg.textContent = "Added “" + data.term + "”.";
+            el.addTermMsg.classList.add("ok");
+            loadSearchTerms();
+        } catch (e) {
+            el.addTermMsg.textContent = "Request failed: " + e.message;
+        }
+    });
+
+    /* ---------- Crawl control (start/stop + live polling) ---------- */
+    function updateCrawlControlUI(latest) {
+        const isRunning = !!(latest && latest.status === "running");
+        el.startCrawlBtn.disabled = isRunning;
+        el.stopCrawlBtn.disabled = !isRunning;
+        el.crawlLiveIndicator.innerHTML = isRunning
+            ? '<span class="live-dot"></span> Live — session #' + latest.id + (latest.is_paused ? " (paused)" : " running")
+            : "Idle — no crawl running";
+        return isRunning;
+    }
+
+    async function pollCrawlState() {
+        try {
+            const latest = await getJSON(API_BASE + "/latest/");
+            const isRunning = updateCrawlControlUI(latest);
+            if (isRunning && currentSessionId && String(latest.id) === String(currentSessionId)) {
+                await loadSessionDetail(currentSessionId);
+                await loadCandidates(currentSessionId, /* preserveSelection */ true);
+            }
+        } catch (e) { /* transient poll failure, ignore */ }
+    }
+
+    el.startCrawlBtn.addEventListener("click", async function () {
+        el.startCrawlBtn.disabled = true;
+        el.crawlControlMsg.textContent = "";
+        el.crawlControlMsg.classList.remove("ok");
+        try {
+            const res = await apiFetch(CONTROL_API_BASE + "/sessions/start/", { method: "POST" });
+            const data = await res.json();
+            if (!res.ok) {
+                el.crawlControlMsg.textContent = data.detail || "Could not start crawling.";
+                return;
+            }
+            el.crawlControlMsg.textContent = "Started session #" + data.id + ".";
+            el.crawlControlMsg.classList.add("ok");
+            await loadSessions();
+            el.sessionSelect.value = data.id;
+            await loadAllForSession(data.id);
+        } catch (e) {
+            el.crawlControlMsg.textContent = "Request failed: " + e.message;
+        } finally {
+            pollCrawlState();
+        }
+    });
+
+    el.stopCrawlBtn.addEventListener("click", async function () {
+        el.stopCrawlBtn.disabled = true;
+        el.crawlControlMsg.textContent = "";
+        el.crawlControlMsg.classList.remove("ok");
+        try {
+            const res = await apiFetch(CONTROL_API_BASE + "/sessions/stop/", { method: "POST" });
+            const data = await res.json();
+            if (!res.ok) {
+                el.crawlControlMsg.textContent = data.detail || "Could not stop crawling.";
+                return;
+            }
+            el.crawlControlMsg.textContent = "Stopped session #" + data.id + ".";
+            el.crawlControlMsg.classList.add("ok");
+            await loadSessions();
+            if (currentSessionId) await loadAllForSession(currentSessionId);
+        } catch (e) {
+            el.crawlControlMsg.textContent = "Request failed: " + e.message;
+        } finally {
+            pollCrawlState();
+        }
+    });
+
+    /* ---------- Submitted phones ---------- */
+    async function loadSubmittedPhones(sessionId) {
+        el.submittedPhones.innerHTML = '<span class="loading-state">Loading…</span>';
+        const data = await getJSON(API_BASE + "/candidates/submitted-phones/?session=" + sessionId);
+        if (data.phones.length === 0) {
+            el.submittedPhones.innerHTML = '<span class="empty-state">Nothing sent to the extension API yet for this session.</span>';
+            return;
+        }
+        el.submittedPhones.innerHTML = data.phones.map(function (p) {
+            return '<span class="phone-chip">' + escapeHtml(p) + "</span>";
+        }).join("");
+    }
+
+    el.copyAllSubmitted.addEventListener("click", async function () {
+        const chips = Array.from(el.submittedPhones.querySelectorAll(".phone-chip")).map(function (c) { return c.textContent; });
+        if (chips.length === 0) return;
+        try {
+            await navigator.clipboard.writeText(chips.join("\n"));
+            el.copyAllSubmitted.textContent = "Copied!";
+            setTimeout(function () { el.copyAllSubmitted.textContent = "Copy all"; }, 1500);
+        } catch (e) { /* clipboard unavailable, ignore */ }
+    });
+
+    el.exportBtn.addEventListener("click", async function () {
+        const phones = currentCandidates.map(function (r) { return r.phone; }).filter(Boolean);
+        if (phones.length === 0) return;
+        try {
+            await navigator.clipboard.writeText(phones.join("\n"));
+            el.exportBtn.textContent = "Copied!";
+            setTimeout(function () { el.exportBtn.textContent = "Copy phones"; }, 1500);
+        } catch (e) { /* clipboard unavailable, ignore */ }
+    });
+
+    /* ---------- Modal ---------- */
+    function openModal(title, body) {
+        el.modalTitle.textContent = title;
+        el.modalBody.textContent = body;
+        el.modalOverlay.classList.add("open");
+    }
+    function closeModal() { el.modalOverlay.classList.remove("open"); }
+    el.modalClose.addEventListener("click", closeModal);
+    el.modalOverlay.addEventListener("click", function (e) { if (e.target === el.modalOverlay) closeModal(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+
+    /* ---------- Orchestration ---------- */
+    async function loadAllForSession(sessionId) {
+        currentSessionId = sessionId;
+        await Promise.all([
+            loadSessionDetail(sessionId),
+            loadCandidates(sessionId),
+            loadSubmittedPhones(sessionId),
+        ]);
+        el.lastUpdated.textContent = "Updated " + new Date().toLocaleTimeString();
+    }
+
+    el.sessionSelect.addEventListener("change", function () {
+        loadAllForSession(el.sessionSelect.value);
+    });
+    el.refreshBtn.addEventListener("click", function () {
+        if (currentSessionId) loadAllForSession(currentSessionId);
+    });
+    el.filterStatus.addEventListener("change", function () { loadCandidates(currentSessionId); });
+    el.filterSearchTerm.addEventListener("change", function () { loadCandidates(currentSessionId); });
+    el.filterPhone.addEventListener("input", function () {
+        clearTimeout(phoneFilterTimer);
+        phoneFilterTimer = setTimeout(function () { loadCandidates(currentSessionId); }, 350);
+    });
+
+    // Reflects crawler.tasks.check_shine_session_health()'s cached
+    // result — a plain HTTP check run on its own slow periodic
+    // schedule (SHINE_SESSION_CHECK_INTERVAL_SECONDS, default 5 min),
+    // not something this poll itself triggers. Polled far less often
+    // than the live crawl state, since the underlying value changes
+    // rarely and there's no benefit to checking more often than the
+    // backend itself refreshes it.
+    async function loadShineSessionBadge() {
+        try {
+            const data = await getJSON(API_BASE + "/shine-session/");
+            let label, cls;
+            if (data.valid === true) {
+                label = "Shine login: valid";
+                cls = "status-success";
+            } else if (data.valid === false) {
+                label = "Shine login: expired — re-login needed";
+                cls = "status-failed";
+            } else {
+                label = "Shine login: unknown";
+                cls = "status-queued";
+            }
+            el.shineSessionBadge.innerHTML = '<span class="badge ' + cls + '">' + label + "</span>";
+        } catch (e) {
+            // Endpoint unreachable — leave whatever was last shown
+            // rather than replacing it with a misleading "unknown".
+        }
+    }
+
+    async function init() {
+        initTheme();
+        try {
+            const latestId = await loadSessions();
+            if (latestId) await loadAllForSession(latestId);
+        } catch (e) {
+            el.sessionMeta.innerHTML = '<span class="empty-state">Could not load dashboard data: ' + escapeHtml(e.message) + "</span>";
+        }
+        loadSearchTerms();
+        pollCrawlState();
+        setInterval(pollCrawlState, 5000);
+        loadShineSessionBadge();
+        setInterval(loadShineSessionBadge, 60000);
+    }
+
+    init();
+})();
+</script>
+
+</body>
+</html>

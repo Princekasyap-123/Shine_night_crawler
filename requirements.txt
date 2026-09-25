@@ -1,0 +1,14 @@
+# Pinned to versions confirmed working in this project's dev
+# environment. playwright/requests/gunicorn are VPS-runtime-only
+# (not exercised by local `manage.py check`), so they're left as
+# floors rather than exact pins.
+Django==5.0.7
+python-dotenv==1.0.1
+djangorestframework==3.15.2
+celery==5.4.0
+redis==5.0.7
+django-celery-beat==2.9.0
+psycopg2-binary==2.9.9
+playwright>=1.45
+requests>=2.32
+gunicorn>=22.0

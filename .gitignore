@@ -1,0 +1,44 @@
+# Secrets / credentials — never commit these
+.env
+shine_storage_state.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# Virtualenvs
+.venv/
+.venv-wsl/
+venv/
+
+# Celery beat's local schedule file (shelve db — several possible
+# extensions depending on the platform's dbm backend) and anything
+# using a non-default --schedule= name for local testing.
+celerybeat-schedule
+celerybeat-schedule.bak
+celerybeat-schedule.dat
+celerybeat-schedule.dir
+celerybeat-schedule-*
+
+# Ad-hoc local logs (e.g. redirected worker/beat output while testing)
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Claude Code's own local session/tool state — never shared config
+.claude/
