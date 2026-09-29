@@ -1,11 +1,76 @@
 import logging
 
+from celery import shared_task
+from django.conf import settings
 from django.utils import timezone
 
 from candidates.models import CandidateRecord
+from sessions.models import CrawlSession
 from submission.client import ExtensionSubmissionError, submit_candidate
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task
+def auto_submit_queued_candidates():
+    """
+    Scheduled automatic submission, restored per explicit instruction
+    after an earlier session where auto-submit was deliberately
+    removed entirely — that removal was because of a real, since-fixed
+    bug: the old pipeline gated every submission behind
+    check_candidate_exists(), which was CONFIRMED broken (returned
+    exists=True for an obviously fake, never-real phone number),
+    silently blocking every real submission. This version has no such
+    gate — it just calls _submit_one() directly, exactly like the
+    dashboard's manual "Send selected to API" button does, so there's
+    only one submission code path total, not two that could drift
+    apart again.
+
+    Gated on queue size, per the new flow: a session's QUEUED
+    candidates aren't touched at all until they first reach
+    AUTO_SUBMIT_QUEUE_THRESHOLD (300) — this tick is scheduled every
+    AUTO_SUBMIT_INTERVAL_SECONDS (6 min), so on any tick where a
+    session hasn't reached the threshold yet, it's skipped entirely
+    and its queue keeps building; once at/above threshold, one batch of
+    AUTO_SUBMIT_BATCH_SIZE (100) oldest QUEUED candidates goes out that
+    tick — not FAILED ones, so a permanently-broken candidate (e.g.
+    missing phone) can't retry itself forever unattended; a failed row
+    still needs an operator to re-select and resend it from the
+    dashboard. Deliberately does not check is_paused: pausing only
+    throttles NEW crawling (extraction) when the queued-count pause
+    threshold trips, it was never meant to also stop already-extracted
+    candidates from being submitted — the two are meant to run
+    independently so submission keeps draining even while crawling is
+    paused.
+
+    Runs for every currently RUNNING session — including one whose
+    crawling has already hard-stopped for the night (NIGHT_END_HOUR)
+    but hasn't yet been marked completed (SUBMISSION_END_HOUR), which
+    is exactly how the new flow keeps submission going for 5 hours
+    after crawling itself stops. See sessions.tasks.stop_nightly_session
+    for that timing.
+    """
+    for session in CrawlSession.objects.filter(status=CrawlSession.Status.RUNNING):
+        queued_count = session.candidates.filter(status=CandidateRecord.Status.QUEUED).count()
+        if queued_count < settings.AUTO_SUBMIT_QUEUE_THRESHOLD:
+            continue
+
+        candidate_ids = list(
+            session.candidates.filter(status=CandidateRecord.Status.QUEUED)
+            .order_by("extracted_at")
+            .values_list("id", flat=True)[: settings.AUTO_SUBMIT_BATCH_SIZE]
+        )
+        if not candidate_ids:
+            continue
+
+        logger.info(
+            "Session #%s: auto-submitting %s queued candidates (queue was %s)",
+            session.pk,
+            len(candidate_ids),
+            queued_count,
+        )
+        for candidate_id in candidate_ids:
+            _submit_one(candidate_id)
 
 
 def _submit_one(candidate_id):

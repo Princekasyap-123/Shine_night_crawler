@@ -220,9 +220,24 @@ SHINE_SEARCH_TERMS = [
 # Night window the scheduler is allowed to run crawl/control ticks in.
 # Enforced by sessions/tasks.py, not just by cron timing, so a task that
 # fires late (e.g. worker was down) never starts a fresh crawl past
-# NIGHT_END_HOUR.
-NIGHT_START_HOUR = int(os.environ.get("NIGHT_START_HOUR", "22"))
+# NIGHT_END_HOUR. Minute-level (not just hour) so a window like
+# 15:40-16:30 can be expressed exactly — see
+# control.tasks.is_within_night_window.
+NIGHT_START_HOUR = int(os.environ.get("NIGHT_START_HOUR", "23"))
+NIGHT_START_MINUTE = int(os.environ.get("NIGHT_START_MINUTE", "0"))
 NIGHT_END_HOUR = int(os.environ.get("NIGHT_END_HOUR", "5"))
+NIGHT_END_MINUTE = int(os.environ.get("NIGHT_END_MINUTE", "0"))
+
+# Later boundary submission and polling keep running until, well past
+# NIGHT_END_HOUR where crawling itself stops — the queue still has
+# candidates sitting in it that were extracted overnight, and the
+# extension backend takes time to structure/resolve each one. The
+# CrawlSession stays 'running' (not completed) between NIGHT_END_HOUR
+# and this time specifically so auto_submit_queued_candidates keeps
+# draining it. See control.tasks.is_within_submission_window and
+# sessions.tasks.stop_nightly_session.
+SUBMISSION_END_HOUR = int(os.environ.get("SUBMISSION_END_HOUR", "10"))
+SUBMISSION_END_MINUTE = int(os.environ.get("SUBMISSION_END_MINUTE", "0"))
 
 # --- CPU / resource protection ------------------------------------------
 # Hard ceiling on concurrent Playwright browser instances. Must stay 1
@@ -255,13 +270,23 @@ CRAWLER_MAX_LOAD_AVERAGE = float(os.environ.get("CRAWLER_MAX_LOAD_AVERAGE", "2.0
 CONTROL_TICK_INTERVAL_SECONDS = int(os.environ.get("CONTROL_TICK_INTERVAL_SECONDS", "60"))
 
 # How often polling checks the extension backend for a resolution on
-# submitted candidates, and how many it checks per tick. Deliberately
-# not scoped to any one CrawlSession or the night window — Ollama
-# structuring on the extension backend can take a while, and a
-# candidate may resolve well after its own session (or the whole
-# night) has ended.
-POLLING_TICK_INTERVAL_SECONDS = int(os.environ.get("POLLING_TICK_INTERVAL_SECONDS", "20"))
+# submitted candidates, and how many it checks per tick. Not scoped to
+# any one CrawlSession, but IS scoped to the submission window (see
+# control.tasks.is_within_submission_window) — Ollama structuring can
+# take a while so a candidate may resolve well after its own session
+# has ended, but polling itself still only runs 23:00-10:00.
+POLLING_TICK_INTERVAL_SECONDS = int(os.environ.get("POLLING_TICK_INTERVAL_SECONDS", "180"))
 POLLING_BATCH_SIZE = int(os.environ.get("POLLING_BATCH_SIZE", "50"))
+
+# How often automatic submission ticks (6 min), how big of a queue has
+# to build up before it starts submitting at all, and how many
+# candidates go out per batch once it does. Restored per explicit
+# instruction — see submission.tasks.auto_submit_queued_candidates's
+# docstring for why it was removed and why this version is safe to
+# bring back, and for how the threshold/batch gating works.
+AUTO_SUBMIT_INTERVAL_SECONDS = int(os.environ.get("AUTO_SUBMIT_INTERVAL_SECONDS", "360"))
+AUTO_SUBMIT_QUEUE_THRESHOLD = int(os.environ.get("AUTO_SUBMIT_QUEUE_THRESHOLD", "300"))
+AUTO_SUBMIT_BATCH_SIZE = int(os.environ.get("AUTO_SUBMIT_BATCH_SIZE", "100"))
 
 # How often the lightweight Shine-session health check runs (plain
 # HTTP request with saved cookies, no browser launch — see
@@ -277,23 +302,31 @@ SHINE_SESSION_CHECK_INTERVAL_SECONDS = int(
 CELERY_BEAT_SCHEDULE = {
     "start-nightly-crawl-session": {
         "task": "sessions.tasks.start_nightly_session",
-        "schedule": crontab(hour=NIGHT_START_HOUR, minute=0),
+        "schedule": crontab(hour=NIGHT_START_HOUR, minute=NIGHT_START_MINUTE),
     },
     "stop-nightly-crawl-session": {
+        # Fires at SUBMISSION_END_HOUR (10am), not NIGHT_END_HOUR (5am)
+        # — crawling itself already stops being dispatched at 5am via
+        # is_within_night_window(), this task closes the session out
+        # once submission has also had its full window to drain the
+        # queue. See sessions.tasks.stop_nightly_session's docstring.
         "task": "sessions.tasks.stop_nightly_session",
-        "schedule": crontab(hour=NIGHT_END_HOUR, minute=0),
+        "schedule": crontab(hour=SUBMISSION_END_HOUR, minute=SUBMISSION_END_MINUTE),
     },
     "tick-control-loop": {
         "task": "sessions.tasks.tick_control_loop",
         "schedule": CONTROL_TICK_INTERVAL_SECONDS,
     },
-    # Submission is manual-only, by explicit instruction: candidates
-    # are only ever sent to the extension API when an operator clicks
-    # "Send selected to API" on the dashboard
-    # (submission.views.SubmitCandidatesView). The old auto-submit
-    # batching app was removed entirely (not just left unscheduled) so
-    # this can't be silently reactivated by adding a schedule entry
-    # back — there is no dispatch_pending_batches task anymore.
+    # Auto-submit restored per explicit instruction — see
+    # submission.tasks.auto_submit_queued_candidates's docstring.
+    # Candidates can still also be sent manually anytime via the
+    # dashboard's "Send selected to API" button
+    # (submission.views.SubmitCandidatesView); both paths share the
+    # same underlying _submit_one().
+    "auto-submit-queued-candidates": {
+        "task": "submission.tasks.auto_submit_queued_candidates",
+        "schedule": AUTO_SUBMIT_INTERVAL_SECONDS,
+    },
     "poll-submitted-candidates": {
         "task": "polling.tasks.poll_submitted_candidates",
         "schedule": POLLING_TICK_INTERVAL_SECONDS,

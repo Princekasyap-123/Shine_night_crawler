@@ -1,0 +1,21 @@
+[Unit]
+Description=Shine Night Crawler - Celery beat scheduler
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=crawler
+Group=crawler
+WorkingDirectory=/opt/shine-night-crawler
+EnvironmentFile=/opt/shine-night-crawler/.env
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+# The schedule file lives outside the repo so a code deploy (git pull)
+# never touches celery beat's own last-run bookkeeping.
+ExecStart=/opt/shine-night-crawler/venv/bin/celery -A config beat \
+    --loglevel=INFO \
+    --schedule=/opt/shine-night-crawler/celerybeat-schedule
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

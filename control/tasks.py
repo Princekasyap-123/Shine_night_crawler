@@ -23,14 +23,46 @@ def _redis_client():
 
 def is_within_night_window(now=None) -> bool:
     """
-    True between NIGHT_START_HOUR and NIGHT_END_HOUR, handling the
-    overnight wrap (22 -> 5) rather than assuming start < end.
+    True between the configured start and end time, to the minute —
+    handling the overnight wrap (23:00 -> 05:00) rather than assuming
+    start < end. Minute precision (not just hour) matters for windows
+    like 15:40-16:30 that start/end mid-hour; comparing only .hour
+    would treat the whole of both hours as in-window instead of just
+    the configured range within them.
+
+    This is the CRAWLING window only (NIGHT_START_HOUR/MINUTE ->
+    NIGHT_END_HOUR/MINUTE, 23:00-05:00 by default) — it gates whether
+    dispatch_next_crawl is allowed to hand out a new search term. It is
+    deliberately shorter than the session's own lifetime: see
+    is_within_submission_window() for the later boundary submission/
+    polling run until.
     """
     now = now or timezone.localtime()
-    start, end = settings.NIGHT_START_HOUR, settings.NIGHT_END_HOUR
+    start = settings.NIGHT_START_HOUR * 60 + settings.NIGHT_START_MINUTE
+    end = settings.NIGHT_END_HOUR * 60 + settings.NIGHT_END_MINUTE
+    current = now.hour * 60 + now.minute
     if start <= end:
-        return start <= now.hour < end
-    return now.hour >= start or now.hour < end
+        return start <= current < end
+    return current >= start or current < end
+
+
+def is_within_submission_window(now=None) -> bool:
+    """
+    True between NIGHT_START_HOUR/MINUTE and the later
+    SUBMISSION_END_HOUR/MINUTE (23:00-10:00 by default) — the window
+    submission and polling are allowed to keep working in, five hours
+    past NIGHT_END_HOUR where crawling itself stops. Same overnight-
+    wrap handling as is_within_night_window(); kept as a separate
+    function (not a parameterized end time) so each call site's intent
+    stays obvious at a glance.
+    """
+    now = now or timezone.localtime()
+    start = settings.NIGHT_START_HOUR * 60 + settings.NIGHT_START_MINUTE
+    end = settings.SUBMISSION_END_HOUR * 60 + settings.SUBMISSION_END_MINUTE
+    current = now.hour * 60 + now.minute
+    if start <= end:
+        return start <= current < end
+    return current >= start or current < end
 
 
 def next_search_term(session_id: int) -> str | None:
@@ -58,23 +90,29 @@ def next_search_term(session_id: int) -> str | None:
 
 def _backlog_count(session: CrawlSession) -> int:
     """
-    Candidates already handed to the extension backend but not yet
-    resolved by polling (success/failed). This is the number that
-    matters for pause/resume: it measures how far submission+Ollama
-    processing has fallen behind the crawler, not how much raw HTML
-    the crawler has queued locally.
+    Candidates extracted but not yet submitted to the extension
+    backend. This is the number the new flow's pause/resume cycle
+    reacts to: how far the crawler has raced ahead of submission,
+    which is a local-queue-size concern, not a "has Ollama caught up"
+    concern (that used to be measured via SUBMITTED count, before this
+    was repurposed — see update_pause_state()'s docstring).
     """
-    return session.candidates.filter(status=CandidateRecord.Status.SUBMITTED).count()
+    return session.candidates.filter(status=CandidateRecord.Status.QUEUED).count()
 
 
 @shared_task
 def update_pause_state(session_id: int):
     """
-    Hysteresis pause/resume: pauses once backlog crosses
-    backlog_pause_threshold, and only resumes once it has dropped back
-    down to backlog_resume_threshold (a lower number) rather than the
-    same threshold — without that gap, a backlog sitting right at the
-    line would flip pause state on almost every tick.
+    Fixed-duration pause/resume: pauses crawling once the QUEUED count
+    reaches backlog_pause_threshold (1000 by default), then resumes
+    unconditionally once pause_duration_minutes (10 by default) has
+    elapsed — no hysteresis against backlog_resume_threshold anymore.
+    That field is kept on the model (existing sessions/history still
+    reference it, and removing it isn't worth a schema churn) but is no
+    longer read here: the new flow explicitly wants a flat "pause for
+    exactly 10 minutes, then go again" cycle rather than waiting for
+    the queue to drain back down to some lower number, since crawling
+    and queueing are meant to run continuously otherwise.
     """
     with transaction.atomic():
         session = CrawlSession.objects.select_for_update().get(pk=session_id)
@@ -89,37 +127,24 @@ def update_pause_state(session_id: int):
             if session.paused_until and now < session.paused_until:
                 return
 
-            if backlog <= session.backlog_resume_threshold:
-                session.is_paused = False
-                session.paused_until = None
-                session.save(update_fields=["is_paused", "paused_until"])
-                logger.info(
-                    "Session #%s resumed: backlog %s <= resume threshold %s",
-                    session_id,
-                    backlog,
-                    session.backlog_resume_threshold,
-                )
-            else:
-                # Pause window elapsed but backlog is still too high —
-                # extend it rather than resuming into a submission
-                # pipeline that clearly hasn't caught up yet.
-                session.paused_until = now + timedelta(minutes=session.pause_duration_minutes)
-                session.save(update_fields=["paused_until"])
-                logger.warning(
-                    "Session #%s stays paused: backlog %s still above resume threshold %s",
-                    session_id,
-                    backlog,
-                    session.backlog_resume_threshold,
-                )
+            session.is_paused = False
+            session.paused_until = None
+            session.save(update_fields=["is_paused", "paused_until"])
+            logger.info(
+                "Session #%s resumed after pause window elapsed (queued was %s)",
+                session_id,
+                backlog,
+            )
         elif backlog >= session.backlog_pause_threshold:
             session.is_paused = True
             session.paused_until = now + timedelta(minutes=session.pause_duration_minutes)
             session.save(update_fields=["is_paused", "paused_until"])
             logger.warning(
-                "Session #%s paused: backlog %s >= pause threshold %s",
+                "Session #%s paused: queued %s >= pause threshold %s, resuming in %s min",
                 session_id,
                 backlog,
                 session.backlog_pause_threshold,
+                session.pause_duration_minutes,
             )
 
 

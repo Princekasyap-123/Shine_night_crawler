@@ -98,7 +98,12 @@ class CrawlSession(models.Model):
     # settings.py so each night's numbers are visible in history and
     # can be adjusted without a redeploy.
     batch_size = models.PositiveIntegerField(default=40)
-    backlog_pause_threshold = models.PositiveIntegerField(default=300)
+    # QUEUED-count threshold that pauses crawling (control.tasks
+    # .update_pause_state) — 1000 by default, paired with a flat
+    # pause_duration_minutes resume rather than backlog_resume_threshold,
+    # which is no longer read by that logic but is kept on the model
+    # since existing session history still has values stored in it.
+    backlog_pause_threshold = models.PositiveIntegerField(default=1000)
     backlog_resume_threshold = models.PositiveIntegerField(default=230)
     pause_duration_minutes = models.PositiveIntegerField(default=10)
 
@@ -125,10 +130,12 @@ class CrawlSession(models.Model):
 
     def mark_completed(self):
         """
-        Ends the session. Called at the 5am hard-stop or when a manual
-        test run is deliberately stopped. Does not touch is_paused —
-        a completed session simply stops being scheduled for further
-        crawl/control ticks, regardless of what pause state it was in.
+        Ends the session. Called at the submission-window hard-stop
+        (10am by default — see sessions.tasks.stop_nightly_session) or
+        when a manual test run is deliberately stopped. Does not touch
+        is_paused — a completed session simply stops being scheduled
+        for further crawl/control ticks, regardless of what pause
+        state it was in.
         """
         self.status = self.Status.COMPLETED
         self.ended_at = timezone.now()

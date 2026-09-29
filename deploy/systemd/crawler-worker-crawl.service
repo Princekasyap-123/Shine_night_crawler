@@ -1,0 +1,32 @@
+[Unit]
+Description=Shine Night Crawler - Celery worker (crawl queue)
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=crawler
+Group=crawler
+WorkingDirectory=/opt/shine-night-crawler
+EnvironmentFile=/opt/shine-night-crawler/.env
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+# Concurrency hard-pinned to 1: CRAWLER_MAX_CONCURRENT_BROWSERS=1 is
+# enforced in code, but keeping the worker itself single-process too
+# is the second line of defense against ever running two Playwright
+# browsers at once on this VPS.
+ExecStart=/opt/shine-night-crawler/venv/bin/celery -A config worker \
+    --loglevel=INFO \
+    -Q crawl \
+    -n crawl@%%h \
+    -c 1
+Restart=always
+RestartSec=5
+
+# CPU/memory ceiling for the browser process this worker launches —
+# the second, OS-level line of defense alongside
+# CRAWLER_MAX_CONCURRENT_BROWSERS in code. Tune to the VPS's actual
+# specs.
+CPUQuota=150%
+MemoryMax=1536M
+
+[Install]
+WantedBy=multi-user.target

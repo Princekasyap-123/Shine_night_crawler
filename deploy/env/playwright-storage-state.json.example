@@ -1,0 +1,5 @@
+{
+  "_comment": "Placeholder only — do not use this file as-is. Generate the real shine_storage_state.json by running `manage.py shine_login` locally (where a browser window can open) or via `xvfb-run` on the VPS, then copy the resulting file to SHINE_STORAGE_STATE_PATH on the server. It contains live session cookies and must never be committed to git.",
+  "cookies": [],
+  "origins": []
+}

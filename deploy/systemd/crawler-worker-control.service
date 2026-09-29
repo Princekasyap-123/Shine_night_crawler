@@ -1,0 +1,21 @@
+[Unit]
+Description=Shine Night Crawler - Celery worker (control queue)
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=crawler
+Group=crawler
+WorkingDirectory=/opt/shine-night-crawler
+EnvironmentFile=/opt/shine-night-crawler/.env
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+ExecStart=/opt/shine-night-crawler/venv/bin/celery -A config worker \
+    --loglevel=INFO \
+    -Q control \
+    -n control@%%h \
+    -c 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

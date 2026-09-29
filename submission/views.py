@@ -8,16 +8,19 @@ from submission.tasks import _submit_one
 class SubmitCandidatesView(APIView):
     """
     Manual, on-demand submission for a specific set of candidate ids —
-    backs the dashboard's "Send to API" button, the only way
-    candidates ever reach the extension API (submission is 100%
-    manual by design; there is no automatic dispatch). Runs
-    synchronously (not via Celery) since this is a small, explicit,
-    human-initiated click where the dashboard wants an immediate
-    per-candidate result to show back, not a fire-and-forget
-    background dispatch. Reuses submission.tasks._submit_one(), which
-    atomically claims each candidate (queued OR failed — a failed row
-    can be re-selected and retried) before sending, so two overlapping
-    submit requests for the same candidate can't both send it.
+    backs the dashboard's "Send to API" button. Candidates also get
+    submitted automatically on their own schedule (see
+    submission.tasks.auto_submit_queued_candidates), but only for
+    QUEUED rows; this manual path is the only way to (re)send a
+    specific FAILED row, or to jump a specific candidate ahead of the
+    automatic batch. Runs synchronously (not via Celery) since this is
+    a small, explicit, human-initiated click where the dashboard wants
+    an immediate per-candidate result to show back, not a
+    fire-and-forget background dispatch. Reuses
+    submission.tasks._submit_one() — the same function the automatic
+    path calls — which atomically claims each candidate before
+    sending, so two overlapping submit requests (manual+manual, or
+    manual+automatic) for the same candidate can't both send it.
     """
 
     def post(self, request):
