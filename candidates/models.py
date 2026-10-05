@@ -23,6 +23,13 @@ class CandidateRecord(models.Model):
         SUBMITTED = "submitted", "Submitted"
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
+        # Set at extraction time, before submission, when the ATS's own
+        # /check endpoint (submission.client.check_phone_exists) says
+        # this phone was already parsed by a previous submission — this
+        # candidate is deliberately never queued for sending, so it
+        # needs its own terminal status to stay visible in the
+        # dashboard rather than silently never appearing there.
+        ALREADY_EXTRACTED = "already_extracted", "Already Extracted"
 
     session = models.ForeignKey(
         CrawlSession,

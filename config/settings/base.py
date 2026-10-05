@@ -161,7 +161,8 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # Hard ceiling per task — if a crawl or submission hangs past this
 # despite the timeouts already set at the Playwright/requests level,
 # the task is killed outright rather than blocking a worker slot
-# indefinitely.
+# indefinitely. (crawl_search_term and auto_submit_queued_candidates
+# override this with their own, longer limits on the task decorator.)
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
 
@@ -252,8 +253,8 @@ CRAWLER_PAGE_LOAD_TIMEOUT_MS = int(
 )
 # Randomized jitter between page loads (seconds) — protects the Shine
 # account from bot-detection as much as it protects VPS CPU.
-CRAWLER_DELAY_MIN_SECONDS = float(os.environ.get("CRAWLER_DELAY_MIN_SECONDS", "3"))
-CRAWLER_DELAY_MAX_SECONDS = float(os.environ.get("CRAWLER_DELAY_MAX_SECONDS", "8"))
+CRAWLER_DELAY_MIN_SECONDS = float(os.environ.get("CRAWLER_DELAY_MIN_SECONDS", "2"))
+CRAWLER_DELAY_MAX_SECONDS = float(os.environ.get("CRAWLER_DELAY_MAX_SECONDS", "5"))
 CRAWLER_MAX_RETRIES_PER_PAGE = int(os.environ.get("CRAWLER_MAX_RETRIES_PER_PAGE", "2"))
 
 # Self-throttle: if 1-minute load average exceeds this, the crawl task
@@ -284,7 +285,7 @@ POLLING_BATCH_SIZE = int(os.environ.get("POLLING_BATCH_SIZE", "50"))
 # instruction — see submission.tasks.auto_submit_queued_candidates's
 # docstring for why it was removed and why this version is safe to
 # bring back, and for how the threshold/batch gating works.
-AUTO_SUBMIT_INTERVAL_SECONDS = int(os.environ.get("AUTO_SUBMIT_INTERVAL_SECONDS", "360"))
+AUTO_SUBMIT_INTERVAL_SECONDS = int(os.environ.get("AUTO_SUBMIT_INTERVAL_SECONDS", "60"))
 AUTO_SUBMIT_QUEUE_THRESHOLD = int(os.environ.get("AUTO_SUBMIT_QUEUE_THRESHOLD", "300"))
 AUTO_SUBMIT_BATCH_SIZE = int(os.environ.get("AUTO_SUBMIT_BATCH_SIZE", "100"))
 
@@ -299,10 +300,17 @@ SHINE_SESSION_CHECK_INTERVAL_SECONDS = int(
     os.environ.get("SHINE_SESSION_CHECK_INTERVAL_SECONDS", "300")
 )
 
+# "expires" on every entry: if a worker/beat was down and a task was
+# queued while nobody was consuming, that task is DROPPED when the
+# worker comes back instead of running late. Without this, a stale
+# stop_nightly_session (or start_nightly_session) sitting in the queue
+# will fire the moment a worker starts and can end a session someone
+# just started by hand.
 CELERY_BEAT_SCHEDULE = {
     "start-nightly-crawl-session": {
         "task": "sessions.tasks.start_nightly_session",
         "schedule": crontab(hour=NIGHT_START_HOUR, minute=NIGHT_START_MINUTE),
+        "options": {"expires": 600},
     },
     "stop-nightly-crawl-session": {
         # Fires at SUBMISSION_END_HOUR (10am), not NIGHT_END_HOUR (5am)
@@ -312,10 +320,12 @@ CELERY_BEAT_SCHEDULE = {
         # queue. See sessions.tasks.stop_nightly_session's docstring.
         "task": "sessions.tasks.stop_nightly_session",
         "schedule": crontab(hour=SUBMISSION_END_HOUR, minute=SUBMISSION_END_MINUTE),
+        "options": {"expires": 600},
     },
     "tick-control-loop": {
         "task": "sessions.tasks.tick_control_loop",
         "schedule": CONTROL_TICK_INTERVAL_SECONDS,
+        "options": {"expires": 120},
     },
     # Auto-submit restored per explicit instruction — see
     # submission.tasks.auto_submit_queued_candidates's docstring.
@@ -326,14 +336,17 @@ CELERY_BEAT_SCHEDULE = {
     "auto-submit-queued-candidates": {
         "task": "submission.tasks.auto_submit_queued_candidates",
         "schedule": AUTO_SUBMIT_INTERVAL_SECONDS,
+        "options": {"expires": 120},
     },
     "poll-submitted-candidates": {
         "task": "polling.tasks.poll_submitted_candidates",
         "schedule": POLLING_TICK_INTERVAL_SECONDS,
+        "options": {"expires": 120},
     },
     "check-shine-session-health": {
         "task": "crawler.tasks.check_shine_session_health",
         "schedule": SHINE_SESSION_CHECK_INTERVAL_SECONDS,
+        "options": {"expires": 120},
     },
 }
 
@@ -365,6 +378,30 @@ EXTENSION_LOGIN_URL = os.environ.get(
 )
 EXTENSION_LOGIN_EMAIL = os.environ.get("EXTENSION_LOGIN_EMAIL", "")
 EXTENSION_LOGIN_PASSWORD = os.environ.get("EXTENSION_LOGIN_PASSWORD", "")
+
+# --- ATS backend (submission.client.submit_candidate / check_phone_exists) --
+# Separate backend from EXTENSION_API_BASE_URL above — this is the new
+# ats.astro-buddy.in service candidates are actually POSTed to now,
+# authenticated with a plain x-api-key header rather than a resolved
+# createdBy login. EXTENSION_API_BASE_URL/EXTENSION_STATUS_API_URL are
+# left as-is since polling.client still checks status against that
+# older backend; only the submit step was moved to this one.
+ATS_SUBMIT_API_URL = os.environ.get("ATS_SUBMIT_API_URL", "https://ats.astro-buddy.in/submit")
+ATS_CHECK_API_URL = os.environ.get("ATS_CHECK_API_URL", "https://ats.astro-buddy.in/check")
+ATS_API_KEY = os.environ.get("ATS_API_KEY", "")
+# Duplicate-check responses took ~6-7s in practice per the API's own
+# documentation, and submit itself does a similar check before
+# queueing — kept generous (60s) rather than tight so a slow backend
+# moment fails a submission over a false timeout.
+ATS_SUBMIT_TIMEOUT_SECONDS = int(os.environ.get("ATS_SUBMIT_TIMEOUT_SECONDS", "60"))
+ATS_CHECK_TIMEOUT_SECONDS = int(os.environ.get("ATS_CHECK_TIMEOUT_SECONDS", "30"))
+# Parallel /check calls per results page — see crawler.tasks._phones_already_extracted.
+ATS_CHECK_CONCURRENCY = int(os.environ.get("ATS_CHECK_CONCURRENCY", "8"))
+# The ATS's own save endpoint always records 1 regardless of what's
+# sent here ("createdBy kuch bhi bhejo, save API ko hamesha 1 jata
+# hai") — sent as 1 literally so the submitted payload matches what
+# actually gets stored.
+ATS_CREATED_BY = int(os.environ.get("ATS_CREATED_BY", "1"))
 
 # NOTE: content.js defines a STATUS_API_ENDPOINT constant
 # (".../candidate-extension/list") but its own pollJobStatus()

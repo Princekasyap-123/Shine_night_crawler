@@ -9,6 +9,12 @@ Group=crawler
 WorkingDirectory=/opt/shine-night-crawler
 EnvironmentFile=/opt/shine-night-crawler/.env
 Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+# A worker that was killed hard (OOM, systemctl kill, power loss)
+# never ran the `finally` that releases the browser lock, which would
+# otherwise block every crawl until its 8-hour TTL expires. This is the
+# only crawl worker, so clearing the lock on start is safe. The leading
+# "-" means "don't fail the unit if redis-cli itself fails".
+ExecStartPre=-/usr/bin/redis-cli -n 3 DEL crawler:browser:lock
 # Concurrency hard-pinned to 1: CRAWLER_MAX_CONCURRENT_BROWSERS=1 is
 # enforced in code, but keeping the worker itself single-process too
 # is the second line of defense against ever running two Playwright

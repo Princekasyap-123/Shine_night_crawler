@@ -9,11 +9,12 @@ Group=crawler
 WorkingDirectory=/opt/shine-night-crawler
 EnvironmentFile=/opt/shine-night-crawler/.env
 Environment=DJANGO_SETTINGS_MODULE=config.settings.production
-# The schedule file lives outside the repo so a code deploy (git pull)
-# never touches celery beat's own last-run bookkeeping.
+# The schedule file lives in /var/lib/crawler (created once at setup,
+# owned by the crawler user), outside the git checkout, so a code
+# deploy (git pull) never touches celery beat's last-run bookkeeping.
 ExecStart=/opt/shine-night-crawler/venv/bin/celery -A config beat \
     --loglevel=INFO \
-    --schedule=/opt/shine-night-crawler/celerybeat-schedule
+    --schedule=/var/lib/crawler/celerybeat-schedule
 Restart=always
 RestartSec=5
 

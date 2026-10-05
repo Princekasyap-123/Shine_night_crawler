@@ -11,7 +11,7 @@ from submission.client import ExtensionSubmissionError, submit_candidate
 logger = logging.getLogger(__name__)
 
 
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1740)
 def auto_submit_queued_candidates():
     """
     Scheduled automatic submission, restored per explicit instruction
@@ -47,7 +47,7 @@ def auto_submit_queued_candidates():
     crawling has already hard-stopped for the night (NIGHT_END_HOUR)
     but hasn't yet been marked completed (SUBMISSION_END_HOUR), which
     is exactly how the new flow keeps submission going for 5 hours
-    after crawling itself stops. See sessions.tasks.stop_nightly_session
+    after crawling stops. See sessions.tasks.stop_nightly_session
     for that timing.
     """
     for session in CrawlSession.objects.filter(status=CrawlSession.Status.RUNNING):

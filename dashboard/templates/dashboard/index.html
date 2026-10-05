@@ -22,6 +22,7 @@
         --submitted: #1d4ed8;
         --success: #16a34a;
         --failed: #dc2626;
+        --already-extracted: #9333ea;
         --radius: 10px;
     }
 
@@ -38,6 +39,7 @@
         --submitted: #60a5fa;
         --success: #4ade80;
         --failed: #f87171;
+        --already-extracted: #c084fc;
     }
 
     * { box-sizing: border-box; }
@@ -205,6 +207,7 @@
     .badge.status-submitted { color: var(--submitted); background: color-mix(in srgb, var(--submitted) 15%, transparent); }
     .badge.status-success { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
     .badge.status-failed { color: var(--failed); background: color-mix(in srgb, var(--failed) 15%, transparent); }
+    .badge.status-already_extracted { color: var(--already-extracted); background: color-mix(in srgb, var(--already-extracted) 15%, transparent); }
     .badge.paused { color: var(--wf-orange); background: color-mix(in srgb, var(--wf-orange) 18%, transparent); }
 
     /* ---------- Stat tiles ---------- */
@@ -233,6 +236,7 @@
     .stat-tile.submitted .stat-value { color: var(--submitted); }
     .stat-tile.success .stat-value { color: var(--success); }
     .stat-tile.failed .stat-value { color: var(--failed); }
+    .stat-tile.already_extracted .stat-value { color: var(--already-extracted); }
 
     /* ---------- Filters ---------- */
     .filters {
@@ -539,6 +543,7 @@
                     <option value="submitted">Submitted</option>
                     <option value="success">Success</option>
                     <option value="failed">Failed</option>
+                    <option value="already_extracted">Already Extracted</option>
                 </select>
                 <select id="filter-search-term">
                     <option value="">All search terms</option>
@@ -752,7 +757,8 @@
             statTile("queued", "Queued", counts.queued || 0) +
             statTile("submitted", "Submitted", counts.submitted || 0) +
             statTile("success", "Success", counts.success || 0) +
-            statTile("failed", "Failed", counts.failed || 0);
+            statTile("failed", "Failed", counts.failed || 0) +
+            statTile("already_extracted", "Already Extracted", counts.already_extracted || 0);
     }
 
     function field(label, value) {

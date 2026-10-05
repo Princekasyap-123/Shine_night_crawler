@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone as dt_timezone
 
 import redis
@@ -16,6 +17,7 @@ from crawler.browser import (
 )
 from crawler.extractors import shine as shine_extractor
 from sessions.models import CrawlSession
+from submission.client import check_phone_exists
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +92,26 @@ def _profile_url_for_card(card_id: str) -> str:
     return f"{settings.SHINE_BASE_URL}/recruiter/search/advanced/#{card_id}"
 
 
+def _phones_already_extracted(phones):
+    unique = {phone for phone in phones if phone}
+    if not unique:
+        return {}
+    with ThreadPoolExecutor(max_workers=settings.ATS_CHECK_CONCURRENCY) as pool:
+        return dict(zip(unique, pool.map(check_phone_exists, unique)))
+
+
 def _save_candidate_cards(session, search_term, page_number, results_page_url, cards):
     saved = 0
+    # Dedup checks run concurrently for the whole page up front — the
+    # ATS /check call is slow (several seconds each), so doing them one
+    # card at a time would dominate page time. Still before any card is
+    # queued for submission; DB writes below stay on this thread.
+    already_extracted = _phones_already_extracted(card[1] for card in cards)
     for card_id, phone, card_text, elements, images, files in cards:
+        status = CandidateRecord.Status.QUEUED
+        if already_extracted.get(phone):
+            status = CandidateRecord.Status.ALREADY_EXTRACTED
+
         _, created = CandidateRecord.objects.get_or_create(
             session=session,
             shine_profile_url=_profile_url_for_card(card_id),
@@ -105,6 +124,7 @@ def _save_candidate_cards(session, search_term, page_number, results_page_url, c
                 "search_term": search_term,
                 "page_number": page_number,
                 "results_page_url": results_page_url,
+                "status": status,
             },
         )
         if created:
@@ -112,7 +132,7 @@ def _save_candidate_cards(session, search_term, page_number, results_page_url, c
     return saved
 
 
-@shared_task(bind=True)
+@shared_task(bind=True, time_limit=4 * 3600, soft_time_limit=4 * 3600 - 60)
 def crawl_search_term(self, session_id: int, search_term: str):
     """
     Runs one search term to completion: opens a single browser session,
