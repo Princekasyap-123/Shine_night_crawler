@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import timedelta
 
 import redis
@@ -11,7 +12,8 @@ from candidates.models import CandidateRecord
 from control.redis_keys import ROTATION_CURSOR_TTL_SECONDS, rotation_cursor_key
 from crawler.browser import is_browser_session_active
 from crawler.models import SearchTerm
-from crawler.tasks import crawl_search_term
+from crawler.positions import sync_from_api
+from crawler.tasks import crawl_search_term, done_terms_for_session
 from sessions.models import CrawlSession
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,17 @@ def next_search_term(session_id: int) -> str | None:
     terms = list(
         SearchTerm.objects.filter(is_active=True).values_list("term", flat=True)
     )
+    # With dozens of terms (synced from the positions API) only the first few
+    # fit into one night. A fixed alphabetical order would crawl the same
+    # ones every night, so the order is shuffled — but with the session id as
+    # the seed, which keeps it stable for the whole session (the rotation
+    # cursor below depends on that) and different from night to night.
+    random.Random(session_id).shuffle(terms)
+    # Terms already crawled to their last page in this session are skipped
+    # (crawler.tasks marks them done) so a finished term is not re-run all
+    # night with every card dropped by the session's dedup.
+    done = done_terms_for_session(session_id)
+    terms = [term for term in terms if term not in done]
     if not terms:
         return None
 
@@ -86,6 +99,25 @@ def next_search_term(session_id: int) -> str | None:
     client.expire(key, ROTATION_CURSOR_TTL_SECONDS)
 
     return terms[index % len(terms)]
+
+
+@shared_task
+def sync_search_terms_from_api():
+    """
+    Scheduled shortly before the night session starts (see
+    POSITIONS_SYNC_HOUR/MINUTE): pulls the weekly positions from the
+    White Force API into the SearchTerm table. On any failure the existing
+    terms are left exactly as they are and the error is logged — a broken
+    API must never leave the night crawl without keywords.
+    """
+    try:
+        return sync_from_api()
+    except Exception:
+        logger.error(
+            "Search-term sync from the positions API failed; keeping the existing terms",
+            exc_info=True,
+        )
+        return None
 
 
 def _backlog_count(session: CrawlSession) -> int:
@@ -197,8 +229,9 @@ def dispatch_next_crawl(session_id: int):
 
     term = next_search_term(session_id)
     if term is None:
-        logger.error(
-            "Session #%s: no active search terms configured, nothing to crawl",
+        logger.info(
+            "Session #%s: no search terms left to crawl (none active, or all "
+            "already done in this session)",
             session_id,
         )
         return

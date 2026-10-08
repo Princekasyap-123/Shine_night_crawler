@@ -300,6 +300,30 @@ SHINE_SESSION_CHECK_INTERVAL_SECONDS = int(
     os.environ.get("SHINE_SESSION_CHECK_INTERVAL_SECONDS", "300")
 )
 
+# --- Search terms from the positions API --------------------------------
+# Before each night session, every position_name from the White Force weekly
+# positions API becomes a search term (control.tasks.sync_search_terms_from_api).
+POSITIONS_API_URL = os.environ.get(
+    "POSITIONS_API_URL", "https://white-force.com/plus/api/get-position-weekly"
+)
+# Blank = the Monday of the current week (falls back to the Monday before it
+# when this week's list is empty). Set YYYY-MM-DD to pin a specific week.
+POSITIONS_API_DATE = os.environ.get("POSITIONS_API_DATE", "")
+POSITIONS_API_TIMEOUT_SECONDS = int(os.environ.get("POSITIONS_API_TIMEOUT_SECONDS", "30"))
+# "A / B" position names become two terms, "A" and "B".
+POSITIONS_SPLIT_ALTERNATIVES = (
+    os.environ.get("POSITIONS_SPLIT_ALTERNATIVES", "true").lower() == "true"
+)
+# When true, active terms that are not in the API list are switched off
+# (never deleted), so the term list mirrors the API.
+POSITIONS_DEACTIVATE_OTHERS = (
+    os.environ.get("POSITIONS_DEACTIVATE_OTHERS", "true").lower() == "true"
+)
+# Must be before NIGHT_START_HOUR/MINUTE so the terms are in place when the
+# session starts.
+POSITIONS_SYNC_HOUR = int(os.environ.get("POSITIONS_SYNC_HOUR", "22"))
+POSITIONS_SYNC_MINUTE = int(os.environ.get("POSITIONS_SYNC_MINUTE", "30"))
+
 # "expires" on every entry: if a worker/beat was down and a task was
 # queued while nobody was consuming, that task is DROPPED when the
 # worker comes back instead of running late. Without this, a stale
@@ -307,6 +331,11 @@ SHINE_SESSION_CHECK_INTERVAL_SECONDS = int(
 # will fire the moment a worker starts and can end a session someone
 # just started by hand.
 CELERY_BEAT_SCHEDULE = {
+    "sync-search-terms-from-api": {
+        "task": "control.tasks.sync_search_terms_from_api",
+        "schedule": crontab(hour=POSITIONS_SYNC_HOUR, minute=POSITIONS_SYNC_MINUTE),
+        "options": {"expires": 1800},
+    },
     "start-nightly-crawl-session": {
         "task": "sessions.tasks.start_nightly_session",
         "schedule": crontab(hour=NIGHT_START_HOUR, minute=NIGHT_START_MINUTE),
@@ -402,6 +431,9 @@ ATS_CHECK_CONCURRENCY = int(os.environ.get("ATS_CHECK_CONCURRENCY", "8"))
 # hai") — sent as 1 literally so the submitted payload matches what
 # actually gets stored.
 ATS_CREATED_BY = int(os.environ.get("ATS_CREATED_BY", "1"))
+# Portal label sent to the ATS with every submission (the "portal" field
+# of /submit). Override from .env with ATS_PORTAL_NAME if it needs to change.
+ATS_PORTAL_NAME = os.environ.get("ATS_PORTAL_NAME", "Shine_night_crawler.com")
 
 # NOTE: content.js defines a STATUS_API_ENDPOINT constant
 # (".../candidate-extension/list") but its own pollJobStatus()

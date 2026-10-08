@@ -89,7 +89,7 @@ def submit_candidate(candidate) -> SubmissionResult:
 
     payload = {
         "text": text,
-        "portal": "recruiter.shine.com",
+        "portal": settings.ATS_PORTAL_NAME,
         "createdBy": settings.ATS_CREATED_BY,
     }
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone as dt_timezone
 import redis
 from celery import shared_task
 from django.conf import settings
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from candidates.models import CandidateRecord
 from common.exceptions import SessionExpiredError
@@ -34,6 +35,32 @@ _SHINE_SESSION_CACHE_TTL_SECONDS = 30 * 60
 
 def _redis_client():
     return redis.Redis.from_url(settings.CELERY_STATE_REDIS_URL)
+
+
+# Per-session set of search terms whose results have been crawled to the
+# end. control.tasks.next_search_term skips these, so a term that already
+# ran to its last page is not re-run (and re-read page by page, with
+# every card dropped by the session's dedup) for the rest of the night.
+_DONE_TERMS_TTL_SECONDS = 24 * 60 * 60
+# A pagination timeout before this page is treated as a transient failure
+# (the term stays eligible for another run); at or after it, as the end
+# of the results Shine is willing to show for one search.
+_MIN_PAGES_TO_TRUST_END = 30
+
+
+def _done_terms_key(session_id: int) -> str:
+    return f"crawler:session:{session_id}:done_terms"
+
+
+def _mark_term_done(session_id: int, term: str) -> None:
+    client = _redis_client()
+    key = _done_terms_key(session_id)
+    client.sadd(key, term)
+    client.expire(key, _DONE_TERMS_TTL_SECONDS)
+
+
+def done_terms_for_session(session_id: int) -> set:
+    return {t.decode() for t in _redis_client().smembers(_done_terms_key(session_id))}
 
 
 @shared_task
@@ -181,6 +208,9 @@ def crawl_search_term(self, session_id: int, search_term: str):
             page_number = 1
             total_saved = 0
             retries = 0
+            # True only when this term genuinely ran out of pages (not when it
+            # was stopped, errored out or hit a transient failure).
+            finished = False
 
             while True:
                 # Re-checked every page, not just once at task start —
@@ -230,10 +260,25 @@ def crawl_search_term(self, session_id: int, search_term: str):
                 )
 
                 if not shine_extractor.has_next_page(page):
+                    finished = True
                     break
 
                 throttle_between_pages()
-                shine_extractor.go_to_next_page(page)
+                try:
+                    shine_extractor.go_to_next_page(page)
+                except (TimeoutError, PlaywrightTimeoutError):
+                    # Shine stops advancing at the end of a search's results
+                    # (observed at page ~44-48). Past _MIN_PAGES_TO_TRUST_END
+                    # pages this is treated as the natural end of the term;
+                    # earlier than that it is a transient failure and the
+                    # term stays eligible for another run.
+                    logger.warning(
+                        "Pagination stopped advancing for %r after page %s",
+                        search_term,
+                        page_number,
+                    )
+                    finished = page_number >= _MIN_PAGES_TO_TRUST_END
+                    break
 
                 if is_login_page(page):
                     raise SessionExpiredError(
@@ -250,6 +295,8 @@ def crawl_search_term(self, session_id: int, search_term: str):
                 page_number,
                 total_saved,
             )
+            if finished:
+                _mark_term_done(session_id, search_term)
 
     except SessionExpiredError:
         # Deliberately not retried: retrying against an expired login
