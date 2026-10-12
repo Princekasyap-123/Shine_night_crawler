@@ -433,7 +433,7 @@ ATS_CHECK_CONCURRENCY = int(os.environ.get("ATS_CHECK_CONCURRENCY", "8"))
 ATS_CREATED_BY = int(os.environ.get("ATS_CREATED_BY", "1"))
 # Portal label sent to the ATS with every submission (the "portal" field
 # of /submit). Override from .env with ATS_PORTAL_NAME if it needs to change.
-ATS_PORTAL_NAME = os.environ.get("ATS_PORTAL_NAME", "Shine_night_crawler.com")
+ATS_PORTAL_NAME = os.environ.get("ATS_PORTAL_NAME", "Shine_night_crawler")
 
 # NOTE: content.js defines a STATUS_API_ENDPOINT constant
 # (".../candidate-extension/list") but its own pollJobStatus()
