@@ -68,6 +68,154 @@ def check_phone_exists(phone: str) -> bool:
     return bool(data.get("exists"))
 
 
+def _payload_for(candidate) -> dict:
+    """
+    {text, portal, createdBy} for one candidate. The ATS requires the
+    candidate's phone number to be the first line of "text" (a resume
+    with no phone on line 1 gets skipped server-side) — raw_text is the
+    card's visible innerText and isn't guaranteed to start with the
+    phone, so it's prepended explicitly rather than assumed.
+    """
+    text = candidate.raw_text
+    if candidate.phone and not text.lstrip().startswith(candidate.phone):
+        text = f"{candidate.phone}\n{text}"
+    return {
+        "text": text,
+        "portal": settings.ATS_PORTAL_NAME,
+        "createdBy": settings.ATS_CREATED_BY,
+    }
+
+
+def get_ats_queued_count() -> int | None:
+    """
+    GET /stats -> jobs_by_status.queued: how many jobs the ATS has
+    accepted but not processed yet. Used to pace batch submission.
+    Returns None when it can't be read — callers treat that as "unknown,
+    don't block on it".
+    """
+    try:
+        response = requests.get(
+            settings.ATS_STATS_API_URL,
+            headers=_ats_headers(),
+            timeout=settings.ATS_STATS_TIMEOUT_SECONDS,
+        )
+        # /stats only lists statuses that currently have jobs, so an
+        # empty ATS queue means the "queued" key is absent, not unknown.
+        return int(response.json()["jobs_by_status"].get("queued", 0))
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        logger.warning("ATS /stats unreadable: %s — not pacing on it this tick", exc)
+        return None
+
+
+def submit_batch(candidates) -> list[SubmissionResult]:
+    """
+    POSTs up to 200 candidates in one call to ATS_BATCH_API_URL
+    (/submit/batch) and returns one SubmissionResult per candidate, in
+    the same order. Each item of the response carries its own "http"
+    code and "status" (the ATS runs every item through the same intake
+    as /submit): 202 queued is success, "already_parsed"/"duplicate" is
+    already_exists, anything else is a per-item rejection (e.g. 422 no
+    phone) and comes back as success=False.
+
+    Raises ExtensionSubmissionError for transport-level problems (or a
+    response that can't be matched to the items sent) — in which case
+    the caller can't know which items were accepted.
+    """
+    if not candidates:
+        return []
+    if len(candidates) > 200:
+        raise ValueError("ATS batch is capped at 200 items")
+
+    try:
+        response = requests.post(
+            settings.ATS_BATCH_API_URL,
+            json={"items": [_payload_for(c) for c in candidates]},
+            headers=_ats_headers(),
+            timeout=settings.ATS_SUBMIT_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise ExtensionSubmissionError(f"Batch request to ATS backend failed: {exc}") from exc
+
+    if response.status_code == 401:
+        raise ExtensionSubmissionError("ATS backend rejected the API key (401)")
+    if response.status_code == 422:
+        raise ExtensionSubmissionError(
+            f"ATS rejected the whole batch (422, {len(candidates)} items): {response.text[:200]}"
+        )
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ExtensionSubmissionError(
+            f"ATS backend returned a non-JSON response (HTTP {response.status_code})"
+        ) from exc
+
+    items = data
+    if isinstance(data, dict):
+        items = data.get("results", data.get("items"))
+    if not isinstance(items, list) or len(items) != len(candidates):
+        raise ExtensionSubmissionError(
+            f"ATS batch response didn't match the {len(candidates)} items sent "
+            f"(HTTP {response.status_code})"
+        )
+
+    results = []
+    for candidate, item in zip(candidates, items):
+        if not isinstance(item, dict):
+            results.append(SubmissionResult(success=False, message="unreadable batch item"))
+            continue
+        http = item.get("http")
+        status = item.get("status")
+        if status == "queued" and http in (None, 202):
+            results.append(SubmissionResult(success=True, message="queued"))
+        elif status == "already_parsed" or item.get("duplicate"):
+            results.append(
+                SubmissionResult(success=False, message=status or "duplicate", already_exists=True)
+            )
+        else:
+            message = str(item.get("message") or status or f"HTTP {http}")
+            logger.warning("ATS backend rejected candidate %s: %s", candidate.pk, message)
+            results.append(SubmissionResult(success=False, message=message))
+    return results
+
+
+def candidate_exists_in_db(phone: str, email: str | None = None) -> bool:
+    """
+    White Force check-candidate-exists: POST {"phone"[, "email"]} ->
+    {"exists": bool, "matched_by": ...}. True means the candidate is
+    already in the DB, i.e. the submission has landed — what polling
+    treats as success. 404 (not found) and 422 (missing params) both
+    come back as valid JSON and mean "not there"; only network errors,
+    5xx and unparseable bodies raise, so the caller can retry later
+    instead of misreading an outage as "not found".
+    """
+    payload = {"phone": phone}
+    if email:
+        payload["email"] = email
+
+    try:
+        response = requests.post(
+            settings.DUPLICATE_CHECK_API_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=settings.DUPLICATE_CHECK_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise ExtensionSubmissionError(f"Exists check failed: {exc}") from exc
+
+    if response.status_code == 429 or response.status_code >= 500:
+        raise ExtensionSubmissionError(f"Exists check returned HTTP {response.status_code}")
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ExtensionSubmissionError(
+            f"Exists check returned a non-JSON response (HTTP {response.status_code})"
+        ) from exc
+
+    return isinstance(data, dict) and bool(data.get("exists"))
+
+
 def submit_candidate(candidate) -> SubmissionResult:
     """
     POSTs one CandidateRecord to the ATS backend (ATS_SUBMIT_API_URL —
@@ -83,20 +231,10 @@ def submit_candidate(candidate) -> SubmissionResult:
     and isn't guaranteed to start with the phone, so it's prepended
     explicitly here rather than assumed.
     """
-    text = candidate.raw_text
-    if candidate.phone and not text.lstrip().startswith(candidate.phone):
-        text = f"{candidate.phone}\n{text}"
-
-    payload = {
-        "text": text,
-        "portal": settings.ATS_PORTAL_NAME,
-        "createdBy": settings.ATS_CREATED_BY,
-    }
-
     try:
         response = requests.post(
             settings.ATS_SUBMIT_API_URL,
-            json=payload,
+            json=_payload_for(candidate),
             headers=_ats_headers(),
             timeout=settings.ATS_SUBMIT_TIMEOUT_SECONDS,
         )

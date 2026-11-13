@@ -167,7 +167,10 @@ def update_pause_state(session_id: int):
                 session_id,
                 backlog,
             )
-        elif backlog >= session.backlog_pause_threshold:
+        elif (
+            settings.CRAWL_PAUSE_ON_BACKLOG
+            and backlog >= session.backlog_pause_threshold
+        ):
             session.is_paused = True
             session.paused_until = now + timedelta(minutes=session.pause_duration_minutes)
             session.save(update_fields=["is_paused", "paused_until"])

@@ -6,7 +6,12 @@ from django.utils import timezone
 
 from candidates.models import CandidateRecord
 from sessions.models import CrawlSession
-from submission.client import ExtensionSubmissionError, submit_candidate
+from submission.client import (
+    ExtensionSubmissionError,
+    get_ats_queued_count,
+    submit_batch,
+    submit_candidate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,45 +19,43 @@ logger = logging.getLogger(__name__)
 @shared_task(time_limit=1800, soft_time_limit=1740)
 def auto_submit_queued_candidates():
     """
-    Scheduled automatic submission, restored per explicit instruction
-    after an earlier session where auto-submit was deliberately
-    removed entirely — that removal was because of a real, since-fixed
-    bug: the old pipeline gated every submission behind
-    check_candidate_exists(), which was CONFIRMED broken (returned
-    exists=True for an obviously fake, never-real phone number),
-    silently blocking every real submission. This version has no such
-    gate — it just calls _submit_one() directly, exactly like the
-    dashboard's manual "Send selected to API" button does, so there's
-    only one submission code path total, not two that could drift
-    apart again.
+    Scheduled automatic submission (every AUTO_SUBMIT_INTERVAL_SECONDS):
+    sends ONE batch of up to AUTO_SUBMIT_BATCH_SIZE (50) oldest QUEUED
+    candidates to the ATS's /submit/batch per tick, paced to the ATS's
+    own throughput rather than to our crawl speed.
 
-    Gated on queue size, per the new flow: a session's QUEUED
-    candidates aren't touched at all until they first reach
-    AUTO_SUBMIT_QUEUE_THRESHOLD (300) — this tick is scheduled every
-    AUTO_SUBMIT_INTERVAL_SECONDS (6 min), so on any tick where a
-    session hasn't reached the threshold yet, it's skipped entirely
-    and its queue keeps building; once at/above threshold, one batch of
-    AUTO_SUBMIT_BATCH_SIZE (100) oldest QUEUED candidates goes out that
-    tick — not FAILED ones, so a permanently-broken candidate (e.g.
-    missing phone) can't retry itself forever unattended; a failed row
-    still needs an operator to re-select and resend it from the
-    dashboard. Deliberately does not check is_paused: pausing only
-    throttles NEW crawling (extraction) when the queued-count pause
-    threshold trips, it was never meant to also stop already-extracted
-    candidates from being submitted — the two are meant to run
-    independently so submission keeps draining even while crawling is
-    paused.
+    Pacing: before the batch, the ATS's GET /stats is read and the tick
+    is skipped while jobs_by_status.queued is above
+    AUTO_SUBMIT_ATS_BACKLOG_MAX (500) — the ATS's retry delays grow
+    with its queue, so piling more on only slows it down. Whatever the
+    crawler extracts faster than that simply stays QUEUED locally for
+    the operator to send manually from the dashboard afterwards;
+    crawling is not slowed down for it (see CRAWL_PAUSE_ON_BACKLOG).
 
-    Runs for every currently RUNNING session — including one whose
-    crawling has already hard-stopped for the night (NIGHT_END_HOUR)
-    but hasn't yet been marked completed (SUBMISSION_END_HOUR), which
-    is exactly how the new flow keeps submission going for 5 hours
-    after crawling stops. See sessions.tasks.stop_nightly_session
-    for that timing.
+    Only QUEUED rows are picked up, never FAILED ones, so a
+    permanently-broken candidate (e.g. missing phone) can't retry itself
+    forever unattended. Deliberately does not check is_paused, and
+    keeps running for a session whose crawling has already stopped
+    (NIGHT_END_HOUR) but hasn't been completed yet
+    (SUBMISSION_END_HOUR). Whether a submitted candidate actually landed
+    is decided later by polling.tasks, 3 minutes after submission.
     """
-    for session in CrawlSession.objects.filter(status=CrawlSession.Status.RUNNING):
+    sessions = list(CrawlSession.objects.filter(status=CrawlSession.Status.RUNNING))
+    if not sessions:
+        return
+
+    ats_queued = get_ats_queued_count()
+    if ats_queued is not None and ats_queued > settings.AUTO_SUBMIT_ATS_BACKLOG_MAX:
+        logger.info(
+            "ATS backlog is %s (> %s), skipping this submit tick",
+            ats_queued,
+            settings.AUTO_SUBMIT_ATS_BACKLOG_MAX,
+        )
+        return
+
+    for session in sessions:
         queued_count = session.candidates.filter(status=CandidateRecord.Status.QUEUED).count()
-        if queued_count < settings.AUTO_SUBMIT_QUEUE_THRESHOLD:
+        if not queued_count or queued_count < settings.AUTO_SUBMIT_QUEUE_THRESHOLD:
             continue
 
         candidate_ids = list(
@@ -60,17 +63,66 @@ def auto_submit_queued_candidates():
             .order_by("extracted_at")
             .values_list("id", flat=True)[: settings.AUTO_SUBMIT_BATCH_SIZE]
         )
-        if not candidate_ids:
-            continue
-
         logger.info(
-            "Session #%s: auto-submitting %s queued candidates (queue was %s)",
+            "Session #%s: auto-submitting batch of %s (local queue was %s, ATS queue %s)",
             session.pk,
             len(candidate_ids),
             queued_count,
+            ats_queued,
         )
-        for candidate_id in candidate_ids:
-            _submit_one(candidate_id)
+        _submit_batch(candidate_ids)
+
+
+def _claim(candidate_id, statuses) -> bool:
+    """
+    Atomically flips one candidate to SUBMITTED. A single UPDATE ...
+    WHERE status IN (...) rather than a read-then-write: two overlapping
+    submitters (double-click, two tabs, manual + automatic) can
+    otherwise both read status=queued before either writes and both
+    POST the same candidate. Only the caller whose UPDATE matches a row
+    proceeds. Works on SQLite too, unlike select_for_update().
+    """
+    return bool(
+        CandidateRecord.objects.filter(pk=candidate_id, status__in=statuses).update(
+            status=CandidateRecord.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            failure_reason=None,
+        )
+    )
+
+
+def _submit_batch(candidate_ids):
+    """
+    Claims each id (QUEUED only) and sends the claimed ones in a single
+    submit_batch() call, then applies each item's own result.
+
+    If the call fails as a whole (ATS down, bad key, response that can't
+    be matched to the items), the claimed rows are put back to QUEUED
+    rather than FAILED, so the next tick retries them on its own —
+    marking 50 candidates FAILED because of one blip would leave them
+    stranded until someone resent them by hand.
+    """
+    claimed_ids = [cid for cid in candidate_ids if _claim(cid, [CandidateRecord.Status.QUEUED])]
+    if not claimed_ids:
+        return
+
+    by_id = CandidateRecord.objects.in_bulk(claimed_ids)
+    candidates = [by_id[cid] for cid in claimed_ids if cid in by_id]
+
+    try:
+        results = submit_batch(candidates)
+    except ExtensionSubmissionError as exc:
+        logger.warning("Batch submission failed, returning %s to the queue: %s", len(candidates), exc)
+        CandidateRecord.objects.filter(
+            pk__in=[c.pk for c in candidates], status=CandidateRecord.Status.SUBMITTED
+        ).update(status=CandidateRecord.Status.QUEUED, submitted_at=None)
+        return
+
+    for candidate, result in zip(candidates, results):
+        # already_exists: the ATS has seen this one before — not a
+        # failure; it stays SUBMITTED and polling confirms it is in the DB.
+        if not (result.success or result.already_exists):
+            candidate.mark_failed(reason=result.message)
 
 
 def _submit_one(candidate_id):
@@ -101,13 +153,8 @@ def _submit_one(candidate_id):
     proceeds; the other sees 0 rows affected and backs off. This works
     on SQLite too, unlike select_for_update() (a silent no-op there).
     """
-    claimed = CandidateRecord.objects.filter(
-        pk=candidate_id,
-        status__in=[CandidateRecord.Status.QUEUED, CandidateRecord.Status.FAILED],
-    ).update(
-        status=CandidateRecord.Status.SUBMITTED,
-        submitted_at=timezone.now(),
-        failure_reason=None,
+    claimed = _claim(
+        candidate_id, [CandidateRecord.Status.QUEUED, CandidateRecord.Status.FAILED]
     )
 
     if not claimed:

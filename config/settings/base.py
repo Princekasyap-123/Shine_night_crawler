@@ -276,8 +276,32 @@ CONTROL_TICK_INTERVAL_SECONDS = int(os.environ.get("CONTROL_TICK_INTERVAL_SECOND
 # control.tasks.is_within_submission_window) — Ollama structuring can
 # take a while so a candidate may resolve well after its own session
 # has ended, but polling itself still only runs 23:00-10:00.
-POLLING_TICK_INTERVAL_SECONDS = int(os.environ.get("POLLING_TICK_INTERVAL_SECONDS", "180"))
-POLLING_BATCH_SIZE = int(os.environ.get("POLLING_BATCH_SIZE", "50"))
+POLLING_TICK_INTERVAL_SECONDS = int(os.environ.get("POLLING_TICK_INTERVAL_SECONDS", "60"))
+POLLING_BATCH_SIZE = int(os.environ.get("POLLING_BATCH_SIZE", "100"))
+# A submitted candidate is only checked for success once it has been
+# SUBMITTED for at least this long (3 min) — the ATS parses in the
+# background, so checking sooner would just say "not there yet".
+SUCCESS_CHECK_DELAY_SECONDS = int(os.environ.get("SUCCESS_CHECK_DELAY_SECONDS", "180"))
+# A SUBMITTED candidate still not found in the DB after this long is
+# marked FAILED so it shows up for manual resend instead of being
+# polled forever.
+SUCCESS_CHECK_GIVE_UP_MINUTES = int(os.environ.get("SUCCESS_CHECK_GIVE_UP_MINUTES", "120"))
+# Parallel exists-checks per polling tick.
+SUCCESS_CHECK_CONCURRENCY = int(os.environ.get("SUCCESS_CHECK_CONCURRENCY", "4"))
+# White Force "is this candidate already in the DB?" endpoint:
+# POST {"phone": ...} -> {"exists": bool, "matched_by": ...}. Used by
+# polling to decide success.
+DUPLICATE_CHECK_API_URL = os.environ.get(
+    "DUPLICATE_CHECK_API_URL", "https://white-force.com/plus/api/check-candidate-exists"
+)
+DUPLICATE_CHECK_TIMEOUT_SECONDS = int(os.environ.get("DUPLICATE_CHECK_TIMEOUT_SECONDS", "15"))
+
+# When true, crawling pauses for pause_duration_minutes whenever the
+# local QUEUED count reaches the session's backlog_pause_threshold.
+# Off by default: the night run is meant to extract continuously, and
+# whatever is still QUEUED afterwards is submitted manually from the
+# dashboard.
+CRAWL_PAUSE_ON_BACKLOG = os.environ.get("CRAWL_PAUSE_ON_BACKLOG", "false").lower() == "true"
 
 # How often automatic submission ticks (6 min), how big of a queue has
 # to build up before it starts submitting at all, and how many
@@ -285,9 +309,17 @@ POLLING_BATCH_SIZE = int(os.environ.get("POLLING_BATCH_SIZE", "50"))
 # instruction — see submission.tasks.auto_submit_queued_candidates's
 # docstring for why it was removed and why this version is safe to
 # bring back, and for how the threshold/batch gating works.
-AUTO_SUBMIT_INTERVAL_SECONDS = int(os.environ.get("AUTO_SUBMIT_INTERVAL_SECONDS", "60"))
-AUTO_SUBMIT_QUEUE_THRESHOLD = int(os.environ.get("AUTO_SUBMIT_QUEUE_THRESHOLD", "300"))
-AUTO_SUBMIT_BATCH_SIZE = int(os.environ.get("AUTO_SUBMIT_BATCH_SIZE", "100"))
+#
+# Current ATS pacing (from the ATS owner): one /submit/batch call of 50
+# items every 30-60s matches the pipeline's ~30 jobs/min throughput.
+# The ATS caps a batch at 200 (422 above that). Before each batch,
+# GET /stats is read and the batch is skipped while the ATS's own
+# queued count is above AUTO_SUBMIT_ATS_BACKLOG_MAX — a long ATS queue
+# stretches its retry delays.
+AUTO_SUBMIT_INTERVAL_SECONDS = int(os.environ.get("AUTO_SUBMIT_INTERVAL_SECONDS", "45"))
+AUTO_SUBMIT_QUEUE_THRESHOLD = int(os.environ.get("AUTO_SUBMIT_QUEUE_THRESHOLD", "0"))
+AUTO_SUBMIT_BATCH_SIZE = min(int(os.environ.get("AUTO_SUBMIT_BATCH_SIZE", "50")), 200)
+AUTO_SUBMIT_ATS_BACKLOG_MAX = int(os.environ.get("AUTO_SUBMIT_ATS_BACKLOG_MAX", "500"))
 
 # How often the lightweight Shine-session health check runs (plain
 # HTTP request with saved cookies, no browser launch — see
@@ -417,6 +449,9 @@ EXTENSION_LOGIN_PASSWORD = os.environ.get("EXTENSION_LOGIN_PASSWORD", "")
 # older backend; only the submit step was moved to this one.
 ATS_SUBMIT_API_URL = os.environ.get("ATS_SUBMIT_API_URL", "https://ats.astro-buddy.in/submit")
 ATS_CHECK_API_URL = os.environ.get("ATS_CHECK_API_URL", "https://ats.astro-buddy.in/check")
+ATS_BATCH_API_URL = os.environ.get("ATS_BATCH_API_URL", "https://ats.astro-buddy.in/submit/batch")
+ATS_STATS_API_URL = os.environ.get("ATS_STATS_API_URL", "https://ats.astro-buddy.in/stats")
+ATS_STATS_TIMEOUT_SECONDS = int(os.environ.get("ATS_STATS_TIMEOUT_SECONDS", "10"))
 ATS_API_KEY = os.environ.get("ATS_API_KEY", "")
 # Duplicate-check responses took ~6-7s in practice per the API's own
 # documentation, and submit itself does a similar check before
